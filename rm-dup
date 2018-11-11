@@ -1,0 +1,188 @@
+#!/bin/bash
+
+# rm-dup
+# -- A script to remove duplicate files
+# Copyright (C) 2011 onlyuser <mailto:onlyuser@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+CMD=`basename $0`
+
+show_help()
+{
+    echo "Usage: $CMD <DIR!={\$HOME}> <EXT={mp4/mp3/flv/png/jpg/gif/bmp}>"
+}
+
+rm_dup_impl() {
+    ALT_FILE="`find \"$DIR\" -name \"$1\" | grep \"\\<$1\\>\" | head -1`"
+    if [ ! -f "$ALT_FILE" ]; then
+        echo "Error: File not found: \"$ALT_FILE\""
+        return 0
+    fi
+    ALT_FILE_SIZE="`du -h \"$ALT_FILE\" | cut -d$'\t' -f1`"
+    if [ "$FILE_SIZE" == "$ALT_FILE_SIZE" ]; then
+        echo -e "\tInfo: Found extra copy of file with same size: \"$ALT_FILE\".. $ALT_FILE_SIZE == $FILE_SIZE"
+        echo -e "\tInfo: Deleting duplicate: \"$FILE\".. $FILE_SIZE"
+        rm -rf "$FILE"
+        FILE="$ALT_FILE"
+    else
+        echo -e "\tInfo: Ignoring duplicate file with different size: \"$ALT_FILE\".. $ALT_FILE_SIZE != $FILE_SIZE"
+    fi
+    return 1
+}
+
+if [ $# -ne 2 ]; then
+    echo "Fail! -- Expecting 2 arguments! ==> $@"
+    show_help
+    exit 1
+fi
+
+if [ -z "`which find`" ]; then
+    echo "Error: Requires \"find\""
+    exit 1
+fi
+
+if [ -z "`which rm`" ]; then
+    echo "Error: Requires \"rm\""
+    exit 1
+fi
+
+if [ -z "`which du`" ]; then
+    echo "Error: Requires \"du\""
+    exit 1
+fi
+
+DIR=$1
+EXT=$2
+
+if [ ! -d $DIR ]; then
+    echo "Error: Directory not found! ==> \"$DIR\""
+    show_help
+    exit 1
+fi
+
+if [ -z "`echo $EXT | egrep '^mp4$|^mp3$|^flv$|^png$|^jpg$|^gif$|^bmp$'`" ]; then
+    echo "Error: Unsupported file extension! ==> \"$EXT\""
+    show_help
+    exit 1
+fi
+
+EXP_DIR=$(cd "$DIR"; pwd)
+if [ "$EXP_DIR" == "$HOME" ]; then
+    echo "Error: Directory can't be \$HOME! ==> \"$DIR\" != \"$HOME\""
+    show_help
+    exit 1
+fi
+
+echo "Removing duplicate files.. (Step 1 of 2)"
+
+ALL_FILES="`find \"$DIR\" -name \"*([0-9]*)*.$EXT\" | sort -r`"
+n="`echo \"$ALL_FILES\" | wc -l`"
+i=0
+while read FILE; do
+    PROGRESS=$(( $i * 100 / $n ))
+    echo "$PROGRESS%"
+
+    if [ ! -f "$FILE" ]; then
+        echo "Error: File not found: \"$FILE\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    if [ -n "`echo $FILE | egrep '\[|\]|@'`" ]; then
+        echo "Info: Ignoring filename containing unsupported characters: '@', '[', and ']': \"$FILE\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    FILE_SIZE="`du -h \"$FILE\" | cut -d$'\t' -f1`"
+    echo "Processing: \"$FILE\".. $FILE_SIZE"
+
+    DELIM_FILE="`echo $FILE | sed 's/\(.*\) (\([0-9]*\))\(.*\)/\1@\2@\3/g'`"
+    PREFIX="`echo $DELIM_FILE | cut -d@ -f1`"
+    NUMBER="`echo $DELIM_FILE | cut -d@ -f2`"
+    SUFFIX="`echo $DELIM_FILE | cut -d@ -f3`"
+
+    PREFIX="`basename \"$PREFIX\"`"
+
+    # numbered filenames
+    for ALT_NUMBER in `seq $(( $NUMBER - 1 )) -1 1`; do
+        rm_dup_impl "$PREFIX ($ALT_NUMBER)$SUFFIX"
+    done
+
+    # stem filename
+    rm_dup_impl "$PREFIX$SUFFIX"
+    if [ ! $? ]; then
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    i=$(( $i + 1 ))
+done <<< "$ALL_FILES"
+echo "100%"
+
+echo "Truncating useless number suffixes.. (Step 2 of 2)"
+
+ALL_FILES="`find \"$DIR\" -name \"*([0-9]*)*.$EXT\" | sort -r`"
+n="`echo \"$ALL_FILES\" | wc -l`"
+i=0
+while read FILE; do
+    PROGRESS=$(( $i * 100 / $n ))
+    echo "$PROGRESS%"
+
+    if [ ! -f "$FILE" ]; then
+        echo "Error: File not found: \"$FILE\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    if [ -n "`echo $FILE | egrep '\[|\]|@'`" ]; then
+        echo "Info: Ignoring filename containing unsupported characters: '@', '[', and ']': \"$FILE\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    FILE_SIZE="`du -h \"$FILE\" | cut -d$'\t' -f1`"
+    echo "Processing: \"$FILE\".. $FILE_SIZE"
+
+    DELIM_FILE="`echo $FILE | sed 's/\(.*\) (\([0-9]*\))\(.*\)/\1@\2@\3/g'`"
+    PREFIX="`echo $DELIM_FILE | cut -d@ -f1`"
+    NUMBER="`echo $DELIM_FILE | cut -d@ -f2`"
+    SUFFIX="`echo $DELIM_FILE | cut -d@ -f3`"
+
+    ORIG_NAME="$PREFIX ($NUMBER)$SUFFIX"
+    NEW_NAME="$PREFIX$SUFFIX"
+
+    if [ ! -f "$ORIG_NAME" ]; then
+        echo "Info: Can't rename \"$ORIG_NAME\" as \"$NEW_NAME\" -- File not found: \"$ORIG_NAME\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    if [ -f "$NEW_NAME" ]; then
+        echo "Info: Can't rename \"$ORIG_NAME\" as \"$NEW_NAME\" -- File already exists: \"$NEW_NAME\""
+        i=$(( $i + 1 ))
+        continue
+    fi
+
+    echo "Info: Renaming \"$ORIG_NAME\" as \"$NEW_NAME\""
+    mv "$ORIG_NAME" "$NEW_NAME"
+
+    i=$(( $i + 1 ))
+done <<< "$ALL_FILES"
+echo "100%"
+
+echo "Done!"
+
+unset ALL_FILES
